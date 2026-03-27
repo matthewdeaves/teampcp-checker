@@ -175,7 +175,7 @@ echo ""
 
 # 6. C2 domains in DNS/logs
 echo -e "${BOLD}[6] C2 domain contact${NC}"
-C2_DOMAINS=("aquasecurtiy" "tdtqy-oyaaa-aaaae-af2dq-cai.raw.icp0.io" "plug-tab-protective-relay.trycloudflare.com")
+C2_DOMAINS=("aquasecurtiy" "tdtqy-oyaaa-aaaae-af2dq-cai.raw.icp0.io" "plug-tab-protective-relay.trycloudflare.com" "models.litellm.cloud")
 C2_FOUND=false
 for domain in "${C2_DOMAINS[@]}"; do
     DNS_HITS=$(grep -r --binary-files=without-match "$domain" /var/log/ 2>/dev/null || true)
@@ -384,9 +384,16 @@ if command -v trivy &>/dev/null; then
     TRIVY_PATH=$(command -v trivy)
     TRIVY_HASH=$(sha256_file "$TRIVY_PATH")
     KNOWN_BAD=(
-        "822dd269ec10459572dfaaefe163dae693c344249a0161953f0d5cdd110bd2a0"
-        "f7084b0229dce605ccc5506b14acd4d954a496da4b6134a294844ca8d601970d"
-        "bef7e2c5a92c4fa4af17791efc1e46311c0f304796f1172fce143e04bc1113243"
+        "822dd269ec10459572dfaaefe163dae693c344249a0161953f0d5cdd110bd2a0"  # Linux-64bit
+        "f7084b0229dce605ccc5506b14acd4d954a496da4b6134a294844ca8d601970d"  # Linux-32bit
+        "bef7e2c5a92c4fa4af17791efc1e46311c0f304796f1172fce192f5efc40f5d7"  # Linux-ARM
+        "e64e152afe2c722d750f10259626f357cdea40420c5eedae37969fbf13abbecf"  # Linux-ARM64
+        "ecce7ae5ffc9f57bb70efd3ea136a2923f701334a8cd47d4fbf01a97fd22859c"  # Linux-PPC64LE
+        "d5edd791021b966fb6af0ace09319ace7b97d6642363ef27b3d5056ca654a94c"  # Linux-s390x
+        "887e1f5b5b50162a60bd03b66269e0ae545d0aef0583c1c5b00972152ad7e073"  # FreeBSD-64bit
+        "e6310d8a003d7ac101a6b1cd39ff6c6a88ee454b767c1bdce143e04bc1113243"  # macOS-64bit
+        "6328a34b26a63423b555a61f89a6a0525a534e9c88584c815d937910f1ddd538"  # macOS-ARM64
+        "0880819ef821cff918960a39c1c1aada55a5593c61c608ea9215da858a86e349"  # Windows-64bit
     )
     HASH_MATCH=false
     for bad in "${KNOWN_BAD[@]}"; do
@@ -510,6 +517,55 @@ if [ -n "$GH_USER" ]; then
 else
     warn "Could not determine GitHub username — review your security log manually:"
     info "https://github.com/settings/security-log"
+fi
+echo ""
+
+# 21. litellm .pth credential stealer (litellm 1.82.8)
+echo -e "${BOLD}[21] litellm .pth credential stealer${NC}"
+LITELLM_FOUND=false
+KNOWN_PTH_HASH="ceNa7wMJnNHy1kRnNCcwJaFjWX3pORLfMh7xGL8TUjg"
+while IFS= read -r sp_dir; do
+    PTH_FILE="$sp_dir/litellm_init.pth"
+    if [ -f "$PTH_FILE" ]; then
+        fail "FOUND: $PTH_FILE — litellm credential stealer payload"
+        info "Size: $(wc -c < "$PTH_FILE") bytes"
+        info "Modified: $(file_date "$PTH_FILE")"
+        LITELLM_FOUND=true
+    fi
+    # Also check if litellm 1.82.8 is installed
+    LITELLM_META="$sp_dir/litellm-1.82.8.dist-info/METADATA"
+    if [ -f "$LITELLM_META" ]; then
+        fail "litellm 1.82.8 is installed in $sp_dir — this is the COMPROMISED version"
+        LITELLM_FOUND=true
+    fi
+done < <(python3 -c "import site; print('\n'.join(site.getsitepackages()))" 2>/dev/null; python3 -c "import site; print(site.getusersitepackages())" 2>/dev/null)
+if ! $LITELLM_FOUND; then
+    pass "No litellm_init.pth or litellm 1.82.8 found in Python site-packages"
+fi
+echo ""
+
+# 22. Suspicious .pth files in Python site-packages
+echo -e "${BOLD}[22] Suspicious .pth files in site-packages${NC}"
+PTH_FOUND=false
+SAFE_PTH="distutils-precedence.pth|easy-install.pth|setuptools.pth|pip.pth|virtualenv.pth|README.txt|__editable__.*\.pth"
+while IFS= read -r sp_dir; do
+    [ -d "$sp_dir" ] || continue
+    while IFS= read -r pth; do
+        [ -z "$pth" ] && continue
+        BASENAME=$(basename "$pth")
+        if echo "$BASENAME" | grep -qE "^($SAFE_PTH)$"; then
+            continue
+        fi
+        # Check if .pth contains executable code (import/exec/subprocess)
+        if grep -qE '^\s*import\s|exec\(|subprocess|base64' "$pth" 2>/dev/null; then
+            fail "Suspicious .pth with executable code: $pth"
+            info "Content preview: $(head -1 "$pth" | cut -c1-120)"
+            PTH_FOUND=true
+        fi
+    done < <(find "$sp_dir" -maxdepth 1 -name "*.pth" -type f 2>/dev/null)
+done < <(python3 -c "import site; print('\n'.join(site.getsitepackages()))" 2>/dev/null; python3 -c "import site; print(site.getusersitepackages())" 2>/dev/null)
+if ! $PTH_FOUND; then
+    pass "No suspicious .pth files with executable code found"
 fi
 echo ""
 
