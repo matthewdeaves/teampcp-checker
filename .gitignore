@@ -1,0 +1,42 @@
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials*
+secrets*
+
+# OS files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.nfs*
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Logs and output
+*.log
+*.out
+output/
+results/
+reports/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# IOC-specific exclusions
+# Prevent accidental commit of scan results that may contain sensitive system info
+scan_results/
+*.ioc
+*.indicators
